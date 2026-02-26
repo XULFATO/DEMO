@@ -175,14 +175,17 @@ Private Sub ProcesarBorradoColumnas(ByRef wb As Workbook, ByVal configNombre As 
     Dim colIndexEnDestino As Long
     Dim listaBorrado As New Collection
     
-    Set wsConfigCol = wb.Worksheets("columnas")
+    ' LEER CONFIGURACION DEL ARCHIVO ORIGINAL
+    Set wsConfigCol = ThisWorkbook.Worksheets("columnas")
     Set wsDestinoCol = wb.Worksheets("FuncionFiltar")
     
     ultimaFilaConf = wsConfigCol.Cells(wsConfigCol.Rows.Count, 2).End(xlUp).Row
     
     Debug.Print "  [COLUMNAS] Procesando..."
+    Debug.Print "    [INFO] Leyendo config de: " & wsConfigCol.Parent.Name & " (archivo ORIGINAL)"
+    Debug.Print "    [INFO] Aplicando a: " & wsDestinoCol.Parent.Name & " (archivo COPIA)"
     Debug.Print "    Ultima fila config: " & ultimaFilaConf
-    Debug.Print "    Columna configuracion: " & colIndex
+    Debug.Print "    Columna configuracion:  Columna configuracion: " & colIndex
     
     For i = 4 To ultimaFilaConf
         nombreColumnaABuscar = Trim(wsConfigCol.Cells(i, 2).Value)
@@ -222,9 +225,11 @@ Private Sub ProcesarBorradoYModificadoFilas(ByRef wb As Workbook, ByVal configNo
     Dim textoExtra As String
     Dim colTexto As Long
     Dim colExtra As Long
+    Dim colIndexFilas As Long
     
+    ' LEER CONFIGURACION DEL ARCHIVO ORIGINAL
     On Error Resume Next
-    Set wsConfigFilas = wb.Worksheets("filas")
+    Set wsConfigFilas = ThisWorkbook.Worksheets("filas")
     Set wsDestinoFilas = wb.Worksheets("TEXOENFILADOS")
     On Error GoTo 0
     
@@ -234,6 +239,18 @@ Private Sub ProcesarBorradoYModificadoFilas(ByRef wb As Workbook, ByVal configNo
     End If
     
     Debug.Print "  [FILAS] Procesando..."
+    Debug.Print "    [INFO] Leyendo config de: " & wsConfigFilas.Parent.Name & " (archivo ORIGINAL)"
+    Debug.Print "    [INFO] Aplicando a: " & wsDestinoFilas.Parent.Name & " (archivo COPIA)"
+    
+    ' BUSCAR la configuracion EN LA HOJA FILAS (no reutilizar colIndex de columnas)
+    colIndexFilas = BuscarIndiceConfiguracion(wsConfigFilas, configNombre)
+    
+    If colIndexFilas = 0 Then
+        Debug.Print "  [ERROR] No se encontro configuracion '" & configNombre & "' en hoja filas"
+        Exit Sub
+    End If
+    
+    Debug.Print "    [OK] Configuracion '" & configNombre & "' encontrada en columna " & colIndexFilas & " de hoja 'filas'"
     
     ' MOSTRAR CONTENIDO DE TEXOENFILADOS
     Debug.Print "    [DEBUG] Contenido de TEXOENFILADOS (primeras 5 filas):"
@@ -248,21 +265,42 @@ Private Sub ProcesarBorradoYModificadoFilas(ByRef wb As Workbook, ByVal configNo
         Debug.Print "      Fila " & debugRow & ": " & debugText
     Next debugRow
     
+    ' BUSCAR en que fila esta el nombre de la configuracion (BOB, BING, BANG)
+    Dim filaEncabezado As Long
+    filaEncabezado = 2  ' Por defecto fila 2
+    Dim colTemp As Long
+    For colTemp = 1 To 10
+        If UCase(Trim(wsConfigFilas.Cells(2, colTemp).Value)) = UCase(configNombre) Or _
+           UCase(Trim(wsConfigFilas.Cells(3, colTemp).Value)) = UCase(configNombre) Then
+            If wsConfigFilas.Cells(2, colTemp).Value <> "" Then
+                filaEncabezado = 2
+            Else
+                filaEncabezado = 3
+            End If
+            Exit For
+        End If
+    Next colTemp
+    
+    Debug.Print "    [DEBUG] Fila de encabezados detectada: " & filaEncabezado
+    
     ' DETECTAR columna con textos (la que tiene >20 caracteres en fila 3)
     colTexto = DetectarColumnaTextos(wsConfigFilas, 3)
     Debug.Print "    Columna con textos detectada: " & colTexto
     
     ' CALCULAR columna extra (colIndex + 5)
-    colExtra = colIndex + 5
-    Debug.Print "    Columna EXTRA para aÃ±adir: " & colExtra & " (" & configNombre & ")"
-    Debug.Print "    Columna configuracion: " & colIndex
-    
+    colExtra = colIndexFilas + 5
+    Debug.Print "    [CALCULO] colIndex=" & colIndex & " + 5 = colExtra=" & colExtra
+    Debug.Print "    Columna EXTRA para aÃ±adir: " & colExtra & " (letra " & Split(Cells(1, colExtra).Address, "$")(1) & ")"
+
+    ' MOSTRAR EJEMPLO de quÃ© lee
+    Debug.Print "    [EJEMPLO] Fila 4:"
+
     ultimaFilaConf = wsConfigFilas.Cells(wsConfigFilas.Rows.Count, colTexto).End(xlUp).Row
     Debug.Print "    Ultima fila config: " & ultimaFilaConf
     
     For i = 3 To ultimaFilaConf
         textoABuscar = Trim(wsConfigFilas.Cells(i, colTexto).Value)
-        valorConfig = UCase(Trim(wsConfigFilas.Cells(i, colIndex).Value))
+        valorConfig = UCase(Trim(wsConfigFilas.Cells(i, colIndexFilas).Value))
         textoExtra = Trim(wsConfigFilas.Cells(i, colExtra).Value)
         
         If Len(textoABuscar) > 5 Then
@@ -286,11 +324,11 @@ Private Sub ProcesarBorradoYModificadoFilas(ByRef wb As Workbook, ByVal configNo
                     If textoExtra <> "" Then
                         ' CORRECCION: Buscar columna del texto y aÃ±adir en la siguiente
                         Dim colTextoDestino As Long
-                        colTextoDestino = EncontrarColumnaConTexto(wsDestinoFilas, filaEncontrada, textoABuscar)
+                        colTextoDestino = EncontrarColumnaConTextoLargo(wsDestinoFilas, filaEncontrada)
                         
                         If colTextoDestino > 0 Then
                             wsDestinoFilas.Cells(filaEncontrada, colTextoDestino + 1).Value = textoExtra
-                            Debug.Print "      [+] Texto EXTRA aÃ±adido en col " & (colTextoDestino + 1) & " (despuÃ©s de col " & colTextoDestino & ")"
+                            Debug.Print "      [+] Texto EXTRA aÃ±adido en col " & (colTextoDestino + 1) & " (despuÃ©s de col " & colTextoDestino & " que tiene el texto largo)"
                         Else
                             Debug.Print "      [!] No se pudo determinar columna del texto"
                         End If
@@ -315,13 +353,40 @@ End Sub
 Private Function BuscarIndiceConfiguracion(ByVal ws As Worksheet, ByVal nombre As String) As Long
     Dim c As Long
     Dim ultimaCol As Long
-    ultimaCol = ws.Cells(3, ws.Columns.Count).End(xlToLeft).Column
-    For c = 3 To ultimaCol
-        If UCase(Trim(ws.Cells(3, c).Value)) = UCase(nombre) Then
+    Dim filaEnc As Long
+    
+    ' Detectar en que fila estan los encabezados (buscar fila 2 o 3)
+    filaEnc = 2  ' Por defecto fila 2
+    
+    ' Si en fila 2 no hay nada relevante, probar fila 3
+    Dim hayDatosEnFila2 As Boolean
+    hayDatosEnFila2 = False
+    For c = 1 To 10
+        If Trim(ws.Cells(2, c).Value) <> "" And _
+           (UCase(Trim(ws.Cells(2, c).Value)) = "BOB" Or _
+            UCase(Trim(ws.Cells(2, c).Value)) = "BING" Or _
+            UCase(Trim(ws.Cells(2, c).Value)) = "BANG") Then
+            hayDatosEnFila2 = True
+            Exit For
+        End If
+    Next c
+    
+    If Not hayDatosEnFila2 Then filaEnc = 3
+    
+    Debug.Print "      [DEBUG-BuscarConfig] Buscando '" & nombre & "' en fila " & filaEnc
+    
+    ultimaCol = ws.Cells(filaEnc, ws.Columns.Count).End(xlToLeft).Column
+    For c = 1 To ultimaCol
+        Debug.Print "        Fila " & filaEnc & ", Col " & c & ": '" & ws.Cells(filaEnc, c).Value & "'"
+        If UCase(Trim(ws.Cells(filaEnc, c).Value)) = UCase(nombre) Then
+            Debug.Print "      [OK] '" & nombre & "' encontrado en columna " & c
             BuscarIndiceConfiguracion = c
             Exit Function
         End If
     Next c
+    
+    Debug.Print "      [ERROR] '" & nombre & "' NO encontrado"
+    BuscarIndiceConfiguracion = 0
 End Function
 
 Private Function EncontrarColumnaPorTexto(ByVal ws As Worksheet, ByVal txt As String) As Long
@@ -418,6 +483,31 @@ Private Function EncontrarColumnaConTexto(ByVal ws As Worksheet, ByVal fila As L
     Next col
     
     EncontrarColumnaConTexto = 0
+End Function
+
+' NUEVA FUNCION MEJORADA: Encontrar columna con el texto MAS LARGO en una fila
+Private Function EncontrarColumnaConTextoLargo(ByVal ws As Worksheet, ByVal fila As Long) As Long
+    Dim col As Long
+    Dim maxLen As Long
+    Dim colMax As Long
+    Dim lenActual As Long
+    
+    maxLen = 0
+    colMax = 0
+    
+    ' Buscar la columna que tiene el texto mÃ¡s largo (mÃ¡s de 20 caracteres)
+    For col = 1 To 20
+        On Error Resume Next
+        lenActual = Len(Trim(ws.Cells(fila, col).Value))
+        On Error GoTo 0
+        
+        If lenActual > maxLen And lenActual > 20 Then
+            maxLen = lenActual
+            colMax = col
+        End If
+    Next col
+    
+    EncontrarColumnaConTextoLargo = colMax
 End Function
 
 Private Sub BorrarElementosEstructurales(ByVal ws As Worksheet, ByVal coleccionIndices As Collection, ByVal tipo As String)

@@ -1,0 +1,743 @@
+Attribute VB_Name = "Módulo2"
+
+Option Explicit
+
+' ======================================================================================
+' FUNCIONES PRINCIPALES PARA BOTONES INDIVIDUALES
+' ======================================================================================
+
+' Botón para generar solo archivo BOB
+Public Sub GenerarBOB()
+    GenerarArchivoIndividual "BOB"
+End Sub
+
+' Botón para generar solo archivo CELERGO
+Public Sub GenerarCELERGO()
+    GenerarArchivoIndividual "CELERGO"
+End Sub
+
+' Botón para generar ambos archivos BOB y CELERGO
+Public Sub GenerarBOByCELERGO()
+    Dim clientes(1) As String
+    Dim i As Integer
+    
+    ' Array con los clientes a generar
+    clientes(0) = "BOB"
+    clientes(1) = "CELERGO"
+    
+    ' Generar archivos para cada cliente en el array
+    For i = LBound(clientes) To UBound(clientes)
+        GenerarArchivoIndividual clientes(i)
+    Next i
+End Sub
+
+' ======================================================================================
+' FUNCIÓN CENTRALIZADA PARA GENERACIÓN INDIVIDUAL
+' ======================================================================================
+
+Private Sub GenerarArchivoIndividual(ByVal clienteNombre As String)
+    Dim wsConfiguracion As Worksheet
+    Dim rutaDestino As String
+    Dim nombreLibroOriginal As String
+    Dim indiceColumnaConfig As Long
+    
+    Debug.Print String(80, "=")
+    Debug.Print "INICIO PROCESO PARA: " & clienteNombre
+    Debug.Print String(80, "=")
+    
+    ' 1. Validar que la hoja 'columnas' existe
+    On Error Resume Next
+    Set wsConfiguracion = ThisWorkbook.Worksheets("columnas")
+    On Error GoTo 0
+    
+    If wsConfiguracion Is Nothing Then
+        MsgBox "Error Crítico: No se encontró la hoja 'columnas'.", vbCritical
+        Exit Sub
+    End If
+    Debug.Print "[OK] Hoja 'columnas' encontrada"
+    
+    ' 2. Validar que el cliente exista en la configuración
+    indiceColumnaConfig = BuscarIndiceConfiguracion(wsConfiguracion, clienteNombre)
+    If indiceColumnaConfig = 0 Then
+        MsgBox "Error: No se encontró la configuración para '" & clienteNombre & "' en la hoja 'columnas'.", vbExclamation
+        Exit Sub
+    End If
+    Debug.Print "[OK] Configuración '" & clienteNombre & "' encontrada en columna: " & indiceColumnaConfig
+    
+    ' 3. CONTROL DE UNIDAD DE RED Y SELECCIÓN DE RUTA
+    rutaDestino = ObtenerRutaDestino()
+    
+    If rutaDestino = "" Then
+        Debug.Print "[CANCELADO] Usuario canceló la operación o no hay ruta válida"
+        Exit Sub
+    End If
+    
+    Debug.Print "[OK] Ruta seleccionada: " & rutaDestino
+    
+    ' 4. Obtener nombre del archivo sin extensiones
+    nombreLibroOriginal = ThisWorkbook.Name
+    nombreLibroOriginal = Replace(nombreLibroOriginal, ".xlsm", "")
+    nombreLibroOriginal = Replace(nombreLibroOriginal, ".xlsx", "")
+    nombreLibroOriginal = Replace(nombreLibroOriginal, ".xls", "")
+    Debug.Print "[OK] Nombre base: " & nombreLibroOriginal
+    
+    ' 5. Optimizar rendimiento
+    GestionarEntorno True
+    
+    ' 6. EJECUTAR GENERACIÓN INDIVIDUAL
+    Debug.Print ""
+    Debug.Print String(80, "-")
+    Debug.Print "PROCESANDO: " & clienteNombre
+    Debug.Print String(80, "-")
+    
+    EjecutarGeneracionIndividual wsConfiguracion, clienteNombre, rutaDestino, nombreLibroOriginal
+    
+    ' 7. Restaurar Excel
+    GestionarEntorno False
+    
+    Debug.Print ""
+    Debug.Print String(80, "=")
+    Debug.Print "PROCESO COMPLETADO PARA: " & clienteNombre
+    Debug.Print String(80, "=")
+    
+    MsgBox "Proceso finalizado correctamente para " & clienteNombre & "." & vbCrLf & _
+           "Archivo generado en: " & rutaDestino & clienteNombre & "_" & nombreLibroOriginal & ".xlsx", vbInformation
+End Sub
+
+' ======================================================================================
+' FUNCIÓN DE CONTROL DE UNIDAD DE RED Y DIÁLOGO DE CARPETAS
+' ======================================================================================
+
+Private Function ObtenerRutaDestino() As String
+    Dim unidadRed As String
+    Dim rutaPorDefecto As String
+    Dim rutaSeleccionada As String
+    Dim respuesta As VbMsgBoxResult
+    
+    unidadRed = "O:\"
+    rutaPorDefecto = unidadRed & "CLIENTES\PRUEBAS\BP\"
+    
+    ' Verificar si la unidad de red está conectada
+    If Not UnidadRedConectada(unidadRed) Then
+        ' Mostrar mensaje de login requerido
+        respuesta = MsgBox("La unidad de red " & unidadRed & " no está conectada." & vbCrLf & vbCrLf & _
+                          "Debe logarse en la red para acceder a " & unidadRed & vbCrLf & vbCrLf & _
+                          "¿Desea seleccionar otra carpeta local para guardar los archivos?", _
+                          vbExclamation + vbYesNo, "Unidad de red no disponible - Login requerido")
+        
+        If respuesta = vbNo Then
+            ObtenerRutaDestino = ""
+            Exit Function
+        End If
+        
+        ' Si dice que sí, mostrar diálogo para seleccionar carpeta local
+        rutaSeleccionada = SeleccionarCarpeta("C:\")
+        If rutaSeleccionada = "" Then
+            ObtenerRutaDestino = ""
+            Exit Function
+        End If
+        
+        ' Asegurar que termina con \
+        If Right(rutaSeleccionada, 1) <> "\" Then
+            rutaSeleccionada = rutaSeleccionada & "\"
+        End If
+        
+        ObtenerRutaDestino = rutaSeleccionada
+        Exit Function
+    End If
+    
+    ' Si la unidad de red está conectada, mostrar diálogo con ruta por defecto
+    rutaSeleccionada = SeleccionarCarpeta(rutaPorDefecto)
+    If rutaSeleccionada = "" Then
+        ObtenerRutaDestino = ""
+        Exit Function
+    End If
+    
+    ' Asegurar que termina con \
+    If Right(rutaSeleccionada, 1) <> "\" Then
+        rutaSeleccionada = rutaSeleccionada & "\"
+    End If
+    
+    ObtenerRutaDestino = rutaSeleccionada
+End Function
+
+' ======================================================================================
+' FUNCIÓN PARA VERIFICAR SI UNIDAD DE RED ESTÁ CONECTADA
+' ======================================================================================
+
+Private Function UnidadRedConectada(ByVal unidad As String) As Boolean
+    Dim fso As Object
+    Dim drive As Object
+    
+    On Error Resume Next
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    ' Verificar si la unidad existe
+    If fso.DriveExists(Left(unidad, 1)) Then
+        Set drive = fso.GetDrive(Left(unidad, 1))
+        
+        ' Verificar si está lista (IsReady)
+        If drive.IsReady Then
+            UnidadRedConectada = True
+        Else
+            UnidadRedConectada = False
+        End If
+    Else
+        UnidadRedConectada = False
+    End If
+    
+    On Error GoTo 0
+End Function
+
+' ======================================================================================
+' FUNCIÓN PARA MOSTRAR DIÁLOGO DE SELECCIÓN DE CARPETA
+' ======================================================================================
+
+Private Function SeleccionarCarpeta(Optional ByVal rutaInicial As String = "C:\") As String
+    Dim shellApp As Object
+    Dim shellFolder As Object
+    Dim ruta As String
+    
+    On Error Resume Next
+    
+    ' Crear objeto Shell.Application
+    Set shellApp = CreateObject("Shell.Application")
+    
+    ' Mostrar diálogo de selección de carpeta con ruta inicial
+    Set shellFolder = shellApp.BrowseForFolder(0, "Seleccione la carpeta donde guardar los archivos:", 0, rutaInicial)
+    
+    If shellFolder Is Nothing Then
+        ' Usuario canceló
+        SeleccionarCarpeta = ""
+        Exit Function
+    End If
+    
+    ' Obtener la ruta seleccionada
+    ruta = shellFolder.Self.Path
+    
+    ' Liberar objetos
+    Set shellFolder = Nothing
+    Set shellApp = Nothing
+    
+    On Error GoTo 0
+    
+    SeleccionarCarpeta = ruta
+End Function
+
+' ======================================================================================
+' FUNCIÓN MODIFICADA PARA CREAR RUTAS EN RED
+' ======================================================================================
+
+Private Function AsegurarRuta(ByVal ruta As String) As Boolean
+    Dim fso As Object
+    Dim carpetas() As String
+    Dim rutaAcumulada As String
+    Dim i As Integer
+    
+    On Error Resume Next
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    ' Separar la ruta en componentes
+    carpetas = Split(ruta, "\")
+    
+    ' Construir la ruta gradualmente y crear carpetas si no existen
+    rutaAcumulada = carpetas(0)  ' Incluir la unidad (ej: "O:" o "C:")
+    
+    For i = 1 To UBound(carpetas)
+        If carpetas(i) <> "" Then
+            rutaAcumulada = rutaAcumulada & "\" & carpetas(i)
+            
+            If Not fso.FolderExists(rutaAcumulada) Then
+                fso.CreateFolder rutaAcumulada
+                Debug.Print "[CREADA] Carpeta: " & rutaAcumulada
+            End If
+        End If
+    Next i
+    
+    AsegurarRuta = fso.FolderExists(ruta)
+    
+    On Error GoTo 0
+End Function
+
+' ======================================================================================
+' PROCESO INDIVIDUAL POR ARCHIVO
+' ======================================================================================
+
+Private Sub EjecutarGeneracionIndividual(ByVal wsRef As Worksheet, ByVal idConfig As String, ByVal rutaCarpeta As String, ByVal nomBase As String)
+    Dim wbCopia As Workbook
+    Dim fFinal As String
+    Dim fTemporal As String
+    Dim indiceColumnaConfig As Long
+    Dim seguridadOriginal As Long
+    
+    fFinal = rutaCarpeta & idConfig & "_" & nomBase & ".xlsx"
+    fTemporal = ThisWorkbook.Path & "\~tmp_" & idConfig & ".xlsm"
+    
+    Debug.Print "[1] Archivo destino: " & fFinal
+    Debug.Print "[2] Creando copia temporal..."
+    
+    ' Crear copia temporal
+    On Error Resume Next
+    If Dir(fTemporal) <> "" Then Kill fTemporal
+    On Error GoTo 0
+    ThisWorkbook.SaveCopyAs fTemporal
+    Debug.Print "  [OK] Temporal creado: " & fTemporal
+    
+    ' --- BYPASS DE SEGURIDAD PARA MACROS ---
+    seguridadOriginal = Application.AutomationSecurity
+    Application.AutomationSecurity = msoAutomationSecurityLow
+    
+    Debug.Print "[3] Abriendo temporal..."
+    Set wbCopia = Workbooks.Open(fTemporal, UpdateLinks:=0)
+    Debug.Print "  [OK] Temporal abierto"
+    
+    ' Restaurar seguridad inmediatamente
+    Application.AutomationSecurity = seguridadOriginal
+    
+    ' Buscar en qué columna está esta configuración
+    indiceColumnaConfig = BuscarIndiceConfiguracion(wsRef, idConfig)
+    Debug.Print "[4] Columna de configuracion: " & indiceColumnaConfig
+    
+    If indiceColumnaConfig > 0 Then
+        ' 1. Procesar Columnas
+        Debug.Print "[5] Procesando COLUMNAS..."
+        ProcesarBorradoColumnas wbCopia, idConfig, indiceColumnaConfig
+        
+        ' 2. Procesar Filas
+        Debug.Print "[6] Procesando FILAS..."
+        ProcesarBorradoYModificadoFilas wbCopia, idConfig, indiceColumnaConfig
+    Else
+        Debug.Print "[ERROR] No se encontro columna para: " & idConfig
+    End If
+    
+    ' --- LIMPIEZA FINAL DEL ARCHIVO ---
+    Debug.Print "[7] Limpiando hojas de configuracion..."
+    Application.DisplayAlerts = False
+    On Error Resume Next
+    wbCopia.Worksheets("columnas").Delete
+    Debug.Print "  [X] Hoja 'columnas' eliminada"
+    wbCopia.Worksheets("filas").Delete
+    Debug.Print "  [X] Hoja 'filas' eliminada"
+    On Error GoTo 0
+    
+    ' Asegurar que la ruta de destino existe antes de guardar
+    If Not AsegurarRuta(rutaCarpeta) Then
+        MsgBox "Error: No se puede crear o acceder a la ruta " & rutaCarpeta, vbCritical
+        wbCopia.Close SaveChanges:=False
+        Exit Sub
+    End If
+    
+    ' Guardar como XLSX (formato 51)
+    Debug.Print "[8] Guardando como .xlsx..."
+    wbCopia.SaveAs Filename:=fFinal, FileFormat:=51
+    wbCopia.Close SaveChanges:=False
+    Debug.Print "  [OK] Guardado: " & fFinal
+    
+    ' Eliminar archivo temporal
+    Debug.Print "[9] Eliminando temporal..."
+    If Dir(fTemporal) <> "" Then Kill fTemporal
+    Application.DisplayAlerts = True
+    Debug.Print "  [OK] Temporal eliminado"
+    
+    Debug.Print "[COMPLETADO] " & idConfig
+End Sub
+
+' ======================================================================================
+' GESTION DE COLUMNAS
+' ======================================================================================
+
+Private Sub ProcesarBorradoColumnas(ByRef wb As Workbook, ByVal configNombre As String, ByVal colIndex As Long)
+    Dim wsConfigCol As Worksheet
+    Dim wsDestinoCol As Worksheet
+    Dim ultimaFilaConf As Long
+    Dim i As Long
+    Dim nombreColumnaABuscar As String
+    Dim valorConfig As String
+    Dim colIndexEnDestino As Long
+    Dim listaBorrado As New Collection
+    
+    ' LEER CONFIGURACION DEL ARCHIVO ORIGINAL
+    Set wsConfigCol = ThisWorkbook.Worksheets("columnas")
+    Set wsDestinoCol = wb.Worksheets("Analisis conceptos BOB")
+    
+    ultimaFilaConf = wsConfigCol.Cells(wsConfigCol.Rows.Count, 2).End(xlUp).Row
+    
+    Debug.Print "  [COLUMNAS] Procesando..."
+    Debug.Print "    [INFO] Leyendo config de: " & wsConfigCol.Parent.Name & " (archivo ORIGINAL)"
+    Debug.Print "    [INFO] Aplicando a: " & wsDestinoCol.Parent.Name & " (archivo COPIA)"
+    Debug.Print "    Ultima fila config: " & ultimaFilaConf
+    Debug.Print "    Columna configuracion: " & colIndex
+    
+    For i = 4 To ultimaFilaConf
+        nombreColumnaABuscar = Trim(wsConfigCol.Cells(i, 2).Value)
+        valorConfig = UCase(Trim(wsConfigCol.Cells(i, colIndex).Value))
+        
+        If nombreColumnaABuscar <> "" Then
+            Debug.Print "    Fila " & i & ": " & nombreColumnaABuscar & " = " & valorConfig
+            
+            If valorConfig = "NO" Then
+                colIndexEnDestino = EncontrarColumnaPorTexto(wsDestinoCol, nombreColumnaABuscar)
+                If colIndexEnDestino > 0 Then
+                    listaBorrado.Add colIndexEnDestino
+                    Debug.Print "      [-] MARCAR BORRAR columna " & colIndexEnDestino
+                Else
+                    Debug.Print "      [!] No encontrada en destino"
+                End If
+            End If
+        End If
+    Next i
+    
+    Debug.Print "    Total columnas a borrar: " & listaBorrado.Count
+    BorrarElementosEstructurales wsDestinoCol, listaBorrado, "COLUMNA"
+End Sub
+
+' ======================================================================================
+' GESTION DE FILAS
+' ======================================================================================
+
+Private Sub ProcesarBorradoYModificadoFilas(ByRef wb As Workbook, ByVal configNombre As String, ByVal colIndex As Long)
+    Dim wsConfigFilas As Worksheet
+    Dim wsDestinoFilas As Worksheet
+    Dim ultimaFilaConf As Long
+    Dim i As Long
+    Dim textoABuscar As String
+    Dim valorConfig As String
+    Dim filaEncontrada As Long
+    Dim listaBorradoFilas As New Collection
+    Dim textoExtra As String
+    Dim colTexto As Long
+    Dim colExtra As Long
+    Dim colIndexFilas As Long
+    
+    ' LEER CONFIGURACION DEL ARCHIVO ORIGINAL
+    On Error Resume Next
+    Set wsConfigFilas = ThisWorkbook.Worksheets("filas")
+    Set wsDestinoFilas = wb.Worksheets("Preguntas generales")
+    On Error GoTo 0
+    
+    If wsConfigFilas Is Nothing Or wsDestinoFilas Is Nothing Then
+        Debug.Print "  [AVISO] Hoja 'filas' o 'Preguntas generales' no existe"
+        Exit Sub
+    End If
+    
+    Debug.Print "  [FILAS] Procesando..."
+    Debug.Print "    [INFO] Leyendo config de: " & wsConfigFilas.Parent.Name & " (archivo ORIGINAL)"
+    Debug.Print "    [INFO] Aplicando a: " & wsDestinoFilas.Parent.Name & " (archivo COPIA)"
+    
+    ' BUSCAR la configuracion EN LA HOJA FILAS (no reutilizar colIndex de columnas)
+    colIndexFilas = BuscarIndiceConfiguracion(wsConfigFilas, configNombre)
+    
+    If colIndexFilas = 0 Then
+        Debug.Print "  [ERROR] No se encontro configuracion '" & configNombre & "' en hoja filas"
+        Exit Sub
+    End If
+    
+    Debug.Print "    [OK] Configuracion '" & configNombre & "' encontrada en columna " & colIndexFilas & " de hoja 'filas'"
+    
+    ' MOSTRAR CONTENIDO DE Preguntas generales
+    Debug.Print "    [DEBUG] Contenido de Preguntas generales (primeras 5 filas):"
+    Dim debugRow As Long
+    Dim debugCol As Long
+    Dim debugText As String
+    For debugRow = 1 To 5
+        debugText = ""
+        For debugCol = 1 To 5
+            debugText = debugText & Left(wsDestinoFilas.Cells(debugRow, debugCol).Value, 20) & " | "
+        Next debugCol
+        Debug.Print "      Fila " & debugRow & ": " & debugText
+    Next debugRow
+    
+    ' BUSCAR en que fila esta el nombre de la configuracion (BOB, CELERGO)
+    Dim filaEncabezado As Long
+    filaEncabezado = 2  ' Por defecto fila 2
+    Dim colTemp As Long
+    For colTemp = 1 To 10
+        If UCase(Trim(wsConfigFilas.Cells(2, colTemp).Value)) = UCase(configNombre) Or _
+           UCase(Trim(wsConfigFilas.Cells(3, colTemp).Value)) = UCase(configNombre) Then
+            If wsConfigFilas.Cells(2, colTemp).Value <> "" Then
+                filaEncabezado = 2
+            Else
+                filaEncabezado = 3
+            End If
+            Exit For
+        End If
+    Next colTemp
+    
+    Debug.Print "    [DEBUG] Fila de encabezados detectada: " & filaEncabezado
+    
+    ' DETECTAR columna con textos (la que tiene >20 caracteres en fila 3)
+    colTexto = DetectarColumnaTextos(wsConfigFilas, 3)
+    Debug.Print "    Columna con textos detectada: " & colTexto
+    
+    ' CALCULAR columna extra (colIndex + 5)
+    colExtra = colIndexFilas + 5
+    Debug.Print "    [CALCULO] colIndex=" & colIndex & " + 5 = colExtra=" & colExtra
+    Debug.Print "    Columna EXTRA para añadir: " & colExtra & " (letra " & Split(Cells(1, colExtra).Address, "$")(1) & ")"
+    
+    ' MOSTRAR EJEMPLO de qué lee
+    Debug.Print "    [EJEMPLO] Fila 4:"
+    
+    ultimaFilaConf = wsConfigFilas.Cells(wsConfigFilas.Rows.Count, colTexto).End(xlUp).Row
+    Debug.Print "    Ultima fila config: " & ultimaFilaConf
+    
+    For i = 3 To ultimaFilaConf
+        textoABuscar = Trim(wsConfigFilas.Cells(i, colTexto).Value)
+        valorConfig = UCase(Trim(wsConfigFilas.Cells(i, colIndexFilas).Value))
+        textoExtra = Trim(wsConfigFilas.Cells(i, colExtra).Value)
+        
+        If Len(textoABuscar) > 5 Then
+            Debug.Print "    Fila " & i & ":"
+            Debug.Print "      Texto: '" & Left(textoABuscar, 40) & "...'"
+            Debug.Print "      Config: " & valorConfig
+            If textoExtra <> "" Then
+                Debug.Print "      Extra: '" & textoExtra & "'"
+            End If
+            
+            filaEncontrada = BuscarFilaPorTextoMejorado(wsDestinoFilas, textoABuscar)
+            
+            If filaEncontrada > 0 Then
+                Debug.Print "      [OK] Encontrado en fila " & filaEncontrada
+                
+                If valorConfig = "NO" Then
+                    listaBorradoFilas.Add filaEncontrada
+                    Debug.Print "      [-] MARCAR BORRAR fila " & filaEncontrada
+                Else
+                    ' SI - Mantener y añadir texto extra si existe
+                    If textoExtra <> "" Then
+                        ' CORRECCION: Buscar columna del texto y añadir en la siguiente
+                        Dim colTextoDestino As Long
+                        colTextoDestino = EncontrarColumnaConTextoLargo(wsDestinoFilas, filaEncontrada)
+                        
+                        If colTextoDestino > 0 Then
+                            wsDestinoFilas.Cells(filaEncontrada, colTextoDestino + 1).Value = textoExtra
+                            Debug.Print "      [+] Texto EXTRA añadido en col " & (colTextoDestino + 1) & " (después de col " & colTextoDestino & " que tiene el texto largo)"
+                        Else
+                            Debug.Print "      [!] No se pudo determinar columna del texto"
+                        End If
+                    Else
+                        Debug.Print "      [=] Mantener sin cambios"
+                    End If
+                End If
+            Else
+                Debug.Print "      [!] NO encontrado en Preguntas generales"
+            End If
+        End If
+    Next i
+    
+    Debug.Print "    Total filas a borrar: " & listaBorradoFilas.Count
+    BorrarElementosEstructurales wsDestinoFilas, listaBorradoFilas, "FILA"
+End Sub
+
+' ======================================================================================
+' FUNCIONES AUXILIARES DE BUSQUEDA Y BORRADO
+' ======================================================================================
+
+Private Function BuscarIndiceConfiguracion(ByVal ws As Worksheet, ByVal nombre As String) As Long
+    Dim c As Long
+    Dim ultimaCol As Long
+    Dim filaEnc As Long
+    
+    ' Detectar en que fila estan los encabezados (buscar fila 2 o 3)
+    filaEnc = 2  ' Por defecto fila 2
+    
+    ' Si en fila 2 no hay nada relevante, probar fila 3
+    Dim hayDatosEnFila2 As Boolean
+    hayDatosEnFila2 = False
+    For c = 1 To 10
+        If Trim(ws.Cells(2, c).Value) <> "" And _
+           (UCase(Trim(ws.Cells(2, c).Value)) = "BOB" Or _
+            UCase(Trim(ws.Cells(2, c).Value)) = "CELERGO") Then
+            hayDatosEnFila2 = True
+            Exit For
+        End If
+    Next c
+    
+    If Not hayDatosEnFila2 Then filaEnc = 3
+    
+    Debug.Print "      [DEBUG-BuscarConfig] Buscando '" & nombre & "' en fila " & filaEnc
+    
+    ultimaCol = ws.Cells(filaEnc, ws.Columns.Count).End(xlToLeft).Column
+    For c = 1 To ultimaCol
+        Debug.Print "        Fila " & filaEnc & ", Col " & c & ": '" & ws.Cells(filaEnc, c).Value & "'"
+        If UCase(Trim(ws.Cells(filaEnc, c).Value)) = UCase(nombre) Then
+            Debug.Print "      [OK] '" & nombre & "' encontrado en columna " & c
+            BuscarIndiceConfiguracion = c
+            Exit Function
+        End If
+    Next c
+    
+    Debug.Print "      [ERROR] '" & nombre & "' NO encontrado"
+    BuscarIndiceConfiguracion = 0
+End Function
+
+Private Function EncontrarColumnaPorTexto(ByVal ws As Worksheet, ByVal txt As String) As Long
+    Dim c As Long
+    Dim r As Long
+    For r = 1 To 5
+        For c = 1 To ws.Cells(r, ws.Columns.Count).End(xlToLeft).Column
+            If UCase(Trim(ws.Cells(r, c).Value)) = UCase(txt) Then
+                EncontrarColumnaPorTexto = c
+                Exit Function
+            End If
+        Next c
+    Next r
+End Function
+
+' NUEVA FUNCION: Detectar columna con textos largos
+Private Function DetectarColumnaTextos(ByVal ws As Worksheet, ByVal fila As Long) As Long
+    Dim col As Long
+    Dim maxLen As Long
+    Dim colMax As Long
+    
+    maxLen = 0
+    colMax = 6  ' Por defecto columna 6 (F)
+    
+    For col = 1 To 20
+        If Len(Trim(ws.Cells(fila, col).Value)) > maxLen Then
+            maxLen = Len(Trim(ws.Cells(fila, col).Value))
+            If maxLen > 20 Then colMax = col
+        End If
+    Next col
+    
+    DetectarColumnaTextos = colMax
+End Function
+
+' CORREGIDA: Buscar en TODAS las columnas, no solo columna 1
+Private Function BuscarFilaPorTextoMejorado(ByVal ws As Worksheet, ByVal txt As String) As Long
+    Dim r As Long
+    Dim c As Long
+    Dim ultimaFila As Long
+    Dim fragmentoBuscado As String
+    Dim textoCelda As String
+    
+    ' CORRECCION: Detectar ultima fila buscando en varias columnas, no solo columna 1
+    ultimaFila = 1
+    Dim tempFila As Long
+    For c = 1 To 10
+        tempFila = ws.Cells(ws.Rows.Count, c).End(xlUp).Row
+        If tempFila > ultimaFila Then ultimaFila = tempFila
+    Next c
+    
+    fragmentoBuscado = IIf(Len(txt) > 20, Left(txt, 20), txt)
+    fragmentoBuscado = Trim(fragmentoBuscado)
+    
+    Debug.Print "        [BUSCAR-DEBUG] Buscando: '" & fragmentoBuscado & "'"
+    Debug.Print "        [BUSCAR-DEBUG] Hoja: " & ws.Name
+    Debug.Print "        [BUSCAR-DEBUG] Ultima fila detectada: " & ultimaFila
+    
+    ' Buscar en TODAS las columnas (1 a 20), NO solo columna 1
+    For r = 1 To ultimaFila
+        For c = 1 To 20
+            On Error Resume Next
+            textoCelda = Trim(ws.Cells(r, c).Value)
+            On Error GoTo 0
+            
+            If Len(textoCelda) > 10 And InStr(1, textoCelda, fragmentoBuscado, vbTextCompare) > 0 Then
+                Debug.Print "        [BUSCAR-OK] Encontrado en fila " & r & ", col " & c
+                BuscarFilaPorTextoMejorado = r
+                Exit Function
+            End If
+        Next c
+    Next r
+    
+    Debug.Print "        [BUSCAR-FAIL] NO encontrado (revisadas " & ultimaFila & " filas)"
+    BuscarFilaPorTextoMejorado = 0
+End Function
+
+' NUEVA FUNCION: Encontrar en qué columna está un texto específico en una fila
+Private Function EncontrarColumnaConTexto(ByVal ws As Worksheet, ByVal fila As Long, ByVal textoBuscado As String) As Long
+    Dim col As Long
+    Dim textoCelda As String
+    Dim fragmento As String
+    
+    fragmento = IIf(Len(textoBuscado) > 20, Left(textoBuscado, 20), textoBuscado)
+    
+    For col = 1 To 20
+        On Error Resume Next
+        textoCelda = Trim(ws.Cells(fila, col).Value)
+        On Error GoTo 0
+        
+        If Len(textoCelda) > 10 And InStr(1, textoCelda, fragmento, vbTextCompare) > 0 Then
+            EncontrarColumnaConTexto = col
+            Exit Function
+        End If
+    Next col
+    
+    EncontrarColumnaConTexto = 0
+End Function
+
+' NUEVA FUNCION MEJORADA: Encontrar columna con el texto MAS LARGO en una fila
+Private Function EncontrarColumnaConTextoLargo(ByVal ws As Worksheet, ByVal fila As Long) As Long
+    Dim col As Long
+    Dim maxLen As Long
+    Dim colMax As Long
+    Dim lenActual As Long
+    
+    maxLen = 0
+    colMax = 0
+    
+    ' Buscar la columna que tiene el texto más largo (más de 20 caracteres)
+    For col = 1 To 20
+        On Error Resume Next
+        lenActual = Len(Trim(ws.Cells(fila, col).Value))
+        On Error GoTo 0
+        
+        If lenActual > maxLen And lenActual > 20 Then
+            maxLen = lenActual
+            colMax = col
+        End If
+    Next col
+    
+    EncontrarColumnaConTextoLargo = colMax
+End Function
+
+Private Sub BorrarElementosEstructurales(ByVal ws As Worksheet, ByVal coleccionIndices As Collection, ByVal tipo As String)
+    If coleccionIndices.Count = 0 Then
+        Debug.Print "      [INFO] No hay elementos para borrar"
+        Exit Sub
+    End If
+    
+    ' Convertir a array para ordenar de mayor a menor
+    Dim arr() As Long
+    ReDim arr(1 To coleccionIndices.Count)
+    Dim i As Long, j As Long, temp As Long
+    
+    For i = 1 To coleccionIndices.Count
+        arr(i) = coleccionIndices(i)
+    Next i
+    
+    ' Ordenar descendente
+    For i = 1 To UBound(arr) - 1
+        For j = i + 1 To UBound(arr)
+            If arr(i) < arr(j) Then
+                temp = arr(i)
+                arr(i) = arr(j)
+                arr(j) = temp
+            End If
+        Next j
+    Next i
+    
+    ' Ejecutar borrado
+    Debug.Print "      Borrando " & tipo & "S..."
+    For i = 1 To UBound(arr)
+        If tipo = "COLUMNA" Then
+            ws.Columns(arr(i)).Delete
+            Debug.Print "        [X] Columna " & arr(i) & " borrada"
+        Else
+            ws.Rows(arr(i)).Delete
+            Debug.Print "        [X] Fila " & arr(i) & " borrada"
+        End If
+    Next i
+    Debug.Print "      [OK] Borrado completado"
+End Sub
+
+' ======================================================================================
+' UTILIDADES DE SISTEMA
+' ======================================================================================
+
+Private Sub GestionarEntorno(ByVal activar As Boolean)
+    Application.ScreenUpdating = Not activar
+    Application.DisplayAlerts = Not activar
+    Application.EnableEvents = Not activar
+    Application.Calculation = IIf(activar, xlCalculationManual, xlCalculationAutomatic)
+End Sub

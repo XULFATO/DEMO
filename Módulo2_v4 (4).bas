@@ -1,4 +1,4 @@
-Attribute VB_Name = "Módulo2"
+ 
 
 Option Explicit
 
@@ -74,16 +74,7 @@ Private Sub GenerarArchivoIndividual(ByVal clienteNombre As String)
     ValidarLiteralesConfiguracion clienteNombre
     On Error GoTo 0
 
-    ' ── 1c. Verificar que la contraseña ADP es correcta ─────────────────────────────
-    If Not VerificarPassword(PASSWORD_HOJAS) Then
-        MsgBox "La contraseña configurada en el módulo no es correcta." & vbCrLf & vbCrLf & _
-               "Ninguna hoja protegida podrá procesarse." & vbCrLf & vbCrLf & _
-               "Contacte con el administrador para actualizar la constante PASSWORD_HOJAS.", _
-               vbCritical, "Contraseña incorrecta"
-        Exit Sub
-    End If
-
-    ' ── 1d. Confirmar que el cliente existe en config ─────────────────────────────────
+    ' ── 1c. Confirmar que el cliente existe en config ─────────────────────────────────
     indiceCol = BuscarIndiceConfiguracion(wsConfigCol, clienteNombre)
     If indiceCol = 0 Then
         MsgBox "Error: no se encontró '" & clienteNombre & "' en la hoja '" & _
@@ -302,55 +293,47 @@ End Function
 ' Si no hay ninguna hoja protegida con clave devuelve True (no hay nada que verificar).
 ' ======================================================================================
 
-Private Function VerificarPassword(ByVal pwd As String) As Boolean
+' ======================================================================================
+' VERIFICACIÓN DE CONTRASEÑA — sobre el libro copia, nunca sobre el original
+' Se llama desde EjecutarGeneracion cuando DisplayAlerts ya es False globalmente.
+' Intenta desproteger la primera hoja con clave: si falla avisa y aborta.
+' Devuelve True si la contraseña es correcta o no hay hojas con clave.
+' ======================================================================================
+
+Private Function VerificarPasswordEnCopia(ByVal wb As Workbook, _
+                                           ByVal pwd As String) As Boolean
     Dim ws As Worksheet
 
-    For Each ws In ThisWorkbook.Worksheets
+    For Each ws In wb.Worksheets
         If ws.ProtectContents Then
-
-            ' Bloque completamente silencioso: sin diálogos, sin errores visibles
-            Application.DisplayAlerts = False
+            ' Intento sin contraseña (hoja sin clave)
             On Error Resume Next
-            ws.Unprotect        ' Intento 1: sin contraseña
+            ws.Unprotect
             On Error GoTo 0
-            Application.DisplayAlerts = True
 
             If ws.ProtectContents Then
-                ' Hoja con contraseña — probar pwd también en silencio
-                Application.DisplayAlerts = False
+                ' Tiene contraseña — probar pwd
                 On Error Resume Next
                 ws.Unprotect pwd
                 On Error GoTo 0
-                Application.DisplayAlerts = True
 
                 If ws.ProtectContents Then
-                    ' pwd incorrecta — hoja sigue bloqueada
+                    ' pwd incorrecta
                     Debug.Print "  [ERROR PASS] Contraseña incorrecta en: " & ws.Name
-                    VerificarPassword = False
+                    VerificarPasswordEnCopia = False
                     Exit Function
                 Else
-                    ' pwd correcta — restaurar protección y confirmar OK
-                    Application.DisplayAlerts = False
-                    On Error Resume Next
-                    ws.Protect pwd
-                    On Error GoTo 0
-                    Application.DisplayAlerts = True
-                    Debug.Print "  [OK PASS] Contraseña verificada en hoja: " & ws.Name
-                    VerificarPassword = True
+                    Debug.Print "  [OK PASS] Contraseña correcta, verificada en: " & ws.Name
+                    ' Dejar desprotegida — EjecutarGeneracion ya continuará desprotegiendo el resto
+                    VerificarPasswordEnCopia = True
                     Exit Function
                 End If
             End If
-            ' Hoja sin contraseña → restaurar protección sin clave y seguir buscando
-            Application.DisplayAlerts = False
-            On Error Resume Next
-            ws.Protect
-            On Error GoTo 0
-            Application.DisplayAlerts = True
         End If
     Next ws
 
     Debug.Print "  [INFO PASS] No hay hojas protegidas con contraseña."
-    VerificarPassword = True
+    VerificarPasswordEnCopia = True
 End Function
 
 ' ======================================================================================
@@ -604,6 +587,20 @@ Private Sub EjecutarGeneracion(ByVal idConfig As String, ByVal indiceCol As Long
     Set wbCopia = Workbooks.Open(fTemporal, UpdateLinks:=0)
     Application.AutomationSecurity = seguridad
     Debug.Print "[4] Temporal abierto"
+
+    ' Verificar contraseña en silencio sobre la copia (DisplayAlerts ya es False)
+    Debug.Print "[4b] Verificando contraseña..."
+    If Not VerificarPasswordEnCopia(wbCopia, PASSWORD_HOJAS) Then
+        wbCopia.Close SaveChanges:=False
+        On Error Resume Next
+        Kill fTemporal
+        On Error GoTo 0
+        GestionarEntorno False
+        MsgBox "La contraseña configurada (PASSWORD_HOJAS) no es correcta." & vbCrLf & vbCrLf & _
+               "El proceso se ha cancelado. Contacte con el administrador.", _
+               vbCritical, "Contraseña incorrecta"
+        Exit Sub
+    End If
 
     Debug.Print "[5] Desprotegiendo hojas..."
     DesprotegerTodasHojas wbCopia, PASSWORD_HOJAS
